@@ -152,6 +152,44 @@ void JITExecutionRuntime::execute(Query *query) {
   compilationThread->join();
 }
 
+long JITExecutionRuntime::run(Query *query) {
+  delay = query->config.getCompilationDelay();
+  dispatcher =
+      new SimpleDispatcher(query->config.getRunLength(), query->config.getParallelism(), query->config.getBufferSize(),
+                           1, query->schema.getInputSize(), query->config.getSourceFile(), 0);
+  globalState = new GlobalState();
+  globalState->window_state = new WindowState *[5];
+
+  this->query = query;
+  this->currentState = DEFAULT;
+  auto variant = compileVariant(query, nullptr, CM_DEFAULT);
+  variant->open(globalState, dispatcher);
+
+  variant->init(globalState, dispatcher);
+
+  defaultVariant = variant;
+
+  currentlyExecutingVariant = variant;
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  /* Launch a group of threads. */
+  auto *t = new std::thread[dispatcher->parallelism];
+  for (size_t i = 0; i < dispatcher->parallelism; i++) {
+    t[i] = std::thread([](Variant* var, size_t tid) { var->execute(tid, 0); }, variant, i);
+  }
+
+  for (size_t i = 0; i < dispatcher->parallelism; i++) {
+    t[i].join();
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+
+  return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+}
+
+
+
 void JITExecutionRuntime::deployOptimized() {
   // In the state machine we only deploy OPTIMIZED when we are INSTRUMENTED
   assert(this->currentState == INSTRUMENTED);

@@ -65,6 +65,11 @@ void Query::execute() {
   jitExecutionRuntime->execute(this);
 }
 
+long Query::run() {
+  auto jitExecutionRuntime = new JITExecutionRuntime();
+  return jitExecutionRuntime->run(this);
+}
+
 /*
  * Relational Operators
  */
@@ -176,8 +181,8 @@ Query &Query::print() {
   return *this;
 }
 
-Query &Query::toOutputBuffer() {
-  Operator *newOp = new WriteToMemOperator(current);
+Query &Query::toOutputBuffer(bool print) {
+  Operator *newOp = new WriteToMemOperator(current, print);
   if (current)
     newOp->rightChild = current;
   root = newOp;

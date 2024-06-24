@@ -18,6 +18,7 @@ public:
   static Query generate(Config &config, Schema &schema, std::string path);
   void generate();
   void execute();
+  long run();
 
   // relational operators
   Query &filter(Predicate &&predicate) { return filter(predicate); };
@@ -46,7 +47,7 @@ public:
   Operator *root;
   Operator *getInputOperator() { return root; }
 
-  Query &toOutputBuffer();
+  Query &toOutputBuffer(bool print = false);
   Schema &schema;
   Config &config;
   Operator *current;

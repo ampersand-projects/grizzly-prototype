@@ -49,9 +49,9 @@ int main(int argc, const char *argv[]) {
                       /**Time at which bid was made (ms since epoch)*/
                       .addFixSizeField("dateTime", DataType::Long, Stream);
 
-  Query::generate(config, schema, path)
+  auto time = Query::generate(config, schema, path)
       // defines a filter operator with a >= predicate on  the field auction
-      .filter(new GreaterEqual("auction", 50))
+      .filter(new LessEqual("auction", 50))
       // adds a key by operator on the auction field
       .groupBy("auction")
       // add a tumbling window over 10 seconds
@@ -59,8 +59,9 @@ int main(int argc, const char *argv[]) {
       // adds a avg aggregation on the price
       .aggregate(Avg("price"))
       // prints the output stream to the console
-      .print()
-      .execute();
+      .toOutputBuffer()
+      .run();
 
+  std::cout << "Time: " << time << std::endl;
   return 0;
 }

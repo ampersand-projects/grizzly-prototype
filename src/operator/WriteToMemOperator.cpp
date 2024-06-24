@@ -3,7 +3,7 @@
 
 #include "operator/WriteToMemOperator.h"
 
-WriteToMemOperator::WriteToMemOperator(Operator *input) : input(input) {
+WriteToMemOperator::WriteToMemOperator(Operator *input, bool print) : input(input), print(print) {
   leftChild = NULL;
   rightChild = NULL;
   name = "WriteToMem";
@@ -20,16 +20,16 @@ void WriteToMemOperator::consume(CodeGenerator &cg) {
   std::stringstream statements;
   cg.ctx(cg.currentPipeline()).outputSchema.print();
 
-  for (auto f : cg.ctx(cg.currentPipeline()).outputSchema.fields) {
-    statements << "buffer[thread_id]." << f.name << "=record." << f.name << ";" << std::endl;
+  statements << "auto idx = buf_sizes[thread_id]++;\n";
+  statements << "buffers[thread_id][idx%BUF_SIZE] = record;" << std::endl;
+  if (print) {
+    statements << "std::cout << buffers[thread_id][idx%BUF_SIZE].to_string() << std::endl;" << std::endl;
   }
 
-  cg.generateStruct(cg.ctx(cg.currentPipeline()).outputSchema, "output", cg.currentPipeline(), false);
-
   std::stringstream intBufferStatement;
-  intBufferStatement << "auto buffer = (output" << cg.currentPipeline() << "*) malloc (sizeof(output"
-                     << cg.currentPipeline() << ")*1000);";
-  intBufferStatement << "int b_i = 0;";
+  intBufferStatement << "#include <unordered_map>\n";
+  intBufferStatement << "auto buffers = std::unordered_map<int, std::vector<record" << cg.currentPipeline() << ">>();\n";
+  intBufferStatement << "auto buf_sizes = std::vector<size_t>();\n";
   cg.file.addStatement(intBufferStatement.str());
 
   statements << std::endl;

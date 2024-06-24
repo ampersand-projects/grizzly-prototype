@@ -332,7 +332,7 @@ void Count::consume(CodeGenerator &cg, Operator *parent) {
  */
 void Min::produce(CodeGenerator &cg, Operator *input) {
   // add field to schema
-  Schema schema = Schema::create().addFixSizeField(fieldId + "_min", DataType::Long, Stream);
+  Schema schema = Schema::create().addFixSizeField(fieldId + "_min", DataType::Long, Stream, "LONG_MAX");
   produce_(cg, input, schema);
   createState(cg, input, schema);
   migrateFrom(cg, input, schema);
@@ -385,7 +385,7 @@ void Min::consume(CodeGenerator &cg, Operator *parent) {
  */
 void Max::produce(CodeGenerator &cg, Operator *input) {
   // add field to schema
-  Schema schema = Schema::create().addFixSizeField(fieldId + "_max", DataType::Long, Stream);
+  Schema schema = Schema::create().addFixSizeField(fieldId + "_max", DataType::Long, Stream, "LONG_MIN");
   produce_(cg, input, schema);
   createState(cg, input, schema);
   migrateFrom(cg, input, schema);
@@ -479,4 +479,70 @@ void Avg::consumeFinalAggregation(CodeGenerator &cg, Operator *pOperator) {
              << " = "
              << "((double)record." << fieldId << "_sum) / ((double)record.count);";
   cg.pipeline(pipeline - 1).addInstruction(CMethod::Instruction(INSTRUCTION_AGGREGATE, statements.str()));
+}
+
+/*
+ * CustomSum
+ */
+void CustomSum::produce(CodeGenerator &cg, Operator *input) {
+  // add three fields to schema (save count and sum to calculate avg later)
+  Schema schema = Schema::create()
+                      .addFixSizeField("payload_sum", DataType::Long, Stream)
+                      .addFixSizeField("window_start", DataType::Long, Stream, "LONG_MAX")
+                      .addFixSizeField("window_end", DataType::Long, Stream, "LONG_MIN");
+
+  produce_(cg, input, schema);
+  createState(cg, input, schema);
+  migrateFrom(cg, input, schema);
+  migrateTo(cg, input, schema);
+  addStatePtr(cg, input, schema);
+}
+
+void CustomSum::consume(CodeGenerator &cg, Operator *parent) {
+
+  consume_(cg, parent);
+  std::stringstream statements;
+  statements << "auto payload = record.payload; ";
+  statements << "auto start_time = record.start_time; ";
+  statements << "auto end_time = record.end_time; ";
+
+  std::stringstream oldValue;
+  if (cg.config.getNuma()) {
+    oldValue << "state" << std::to_string(pipeline) << "[bufferIndex][key]";
+  } else {
+    if (cg.ctx(pipeline).hasGroupBy) {
+      oldValue << "state" << std::to_string(pipeline) << "[bufferIndex][key]";
+    } else {
+      oldValue << "state" << std::to_string(pipeline) << "[bufferIndex]";
+    }
+  }
+
+  statements << oldValue.str() << ".payload_sum += payload;" << std::endl;
+
+  statements << "long old_start; do {\n"
+                "// Take a snapshot\n"
+                "old_start = "
+             << oldValue.str() << ".window_start;"
+             << ";\n"
+                "// Quit if snapshot meets condition.\n"
+                "if( old_start<=start_time ) break;\n"
+                "// Attempt to install new value.\n"
+                "} while( "
+             << oldValue.str() << ".window_start.compare_and_swap(start_time,old_start)!=old_start);";
+
+  statements << "long old_end; do {\n"
+                "// Take a snapshot\n"
+                "old_end = "
+             << oldValue.str() << ".window_end;"
+             << ";\n"
+                "// Quit if snapshot meets condition.\n"
+                "if( old_end>=end_time ) break;\n"
+                "// Attempt to install new value.\n"
+                "} while( "
+             << oldValue.str() << ".window_end.compare_and_swap(end_time,old_end)!=old_end);";
+
+  cg.pipeline(pipeline).addInstruction(CMethod::Instruction(INSTRUCTION_AGGREGATE, statements.str()));
+  if (parent != nullptr) {
+    parent->consume(cg);
+  }
 }
